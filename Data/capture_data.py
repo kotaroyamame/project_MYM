@@ -3,8 +3,8 @@ import cv2
 import sys
 import sys
 
-from calibration import get_calibration_data
 sys.path.append('../')
+from calibration import get_calibration_data
 from cv_chess_functions import (read_img,
 															 canny_edge,
 															 hough_line,

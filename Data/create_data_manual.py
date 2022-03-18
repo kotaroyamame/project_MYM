@@ -1,7 +1,7 @@
 import sys
 
-from calibration import get_calibration_data
 sys.path.append('../')
+from calibration import get_calibration_data
 import glob
 import re
 import math
@@ -11,9 +11,9 @@ import scipy.spatial as spatial
 import scipy.cluster as cluster
 from collections import defaultdict
 from statistics import mean
+import os
 from cv_chess_functions import (points_by_points_with_twopoint_perspective, read_img,
-															 augment_points, undistort,
-															 write_crop_images,)
+															 augment_points, undistort,)
 pt=[]
 n=0
 #マウスの操作があるとき呼ばれる関数
@@ -38,7 +38,8 @@ def read_img(file):
 
 	W = 1000
 	height, width, depth = img.shape
-	imgScale = width #W / width
+	#imgScale = width 
+	imgScale = W / width
 	newX, newY = img.shape[1] * imgScale, img.shape[0] * imgScale
 	img = cv2.resize(img, (int(newX), int(newY)))
 
@@ -46,8 +47,21 @@ def read_img(file):
 	gray_blur = cv2.blur(gray, (5, 5))
 	return img, gray_blur
 
+# Read image and do lite image processing
+def read_img_and_rescale(file, points):
+	img = cv2.imread(str(file), 1)
 
+	W = 1000
+	height, width, depth = img.shape
+	#imgScale = width 
+	imgScale = W / width
+	newX, newY = img.shape[1] * imgScale, img.shape[0] * imgScale
+	img = cv2.resize(img, (int(newX), int(newY)))
+	gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+	gray_blur = cv2.blur(gray, (5, 5))
 
+	points *= imgScale
+	return img, gray_blur
 
 
 # Hough line detection
@@ -133,20 +147,29 @@ def write_crop_images(img, points, img_count, folder_path='./raw_data/',X=9):
 
 
 				for rowi in range(len(points)-1):
-					row = points[rowi]
-					print('row',row)
-					for s in range(len(row)-2):
+					row_upper = points[rowi]
+					row_lower = points[rowi + 1]
+					#print('row',row)
+					for s in range(len(row_lower)-2):
 						# ratio_h = 2
 						# ratio_w = 1
-						print('s',s)
-						print('points',len(row),row[s])
+						#print('s',s)
+						#print('points',len(row),row[s])
+						'''
 						base_len = math.dist(row[s], row[s + 1])
 						bot_left, bot_right = row[s], row[s + 1]
 						hoo = np.array(bot_right) - np.array( bot_left)
 						if hoo[0]<=0 or hoo[1]<=0:
 							continue
-						start_x, start_y = int(bot_left[0]), int(bot_left[1] - (base_len * 2))
-						end_x, end_y = int(bot_right[0]), int(bot_right[1])
+						'''
+						#start_x, start_y = int(bot_left[0]), int(bot_left[1] - (base_len * 2))
+						#end_x, end_y = int(bot_right[0]), int(bot_right[1])
+						start_x = int(min(row_lower[s][0], row_lower[s + 1][0], row_upper[s][0], row_upper[s + 1][0]))
+						end_x = int(max(row_lower[s][0], row_lower[s + 1][0], row_upper[s][0], row_upper[s + 1][0]))
+						start_y = int(min(row_lower[s][1], row_lower[s + 1][1], row_upper[s][1], row_upper[s + 1][1]))
+						end_y = int(max(row_lower[s][1], row_lower[s + 1][1], row_upper[s][1], row_upper[s + 1][1]))
+						start_y = int(1.5 * start_y - 0.5 * end_y)
+						print(start_x)
 						if start_y < 0:
 										start_y = 0
 						print('start_y, end_y, start_x, end_x',start_y, end_y, start_x, end_x)
@@ -157,7 +180,9 @@ def write_crop_images(img, points, img_count, folder_path='./raw_data/',X=9):
 							continue
 						img_count += 1
 						print("cropped",cropped,len(cropped),np.shape(cropped))
+						os.makedirs('./test_data', exist_ok=True)
 						cv2.imwrite('./test_data/crop_data_image' + str(img_count) + '.jpeg', cropped)
+						#cv2.imwrite('./test_data/crop_data_image' + str(img_count) + '.jpeg', cropped)
 						print(folder_path + 'data' + str(img_count) + '.jpeg')
 				return img_count
 
@@ -182,7 +207,7 @@ frame2 = frame.copy()
 cv2.imshow('live', frame)
 global points
 points = []
-camera,dist=get_calibration_data()
+#camera,dist=get_calibration_data()
 while(True):
 	frame2 = frame.copy()
 	ptl = np.array( pt )
@@ -222,13 +247,14 @@ while(True):
 img_count=0
 for file_name in img_filename_list:
 				print(file_name)
-				img, gray_blur = read_img(file_name)
+				rescaled_points = points.copy()
+				img, gray_blur = read_img_and_rescale(file_name, rescaled_points)
 				print(np.shape(img))
 				print(np.shape(gray_blur))
 
-				print('points: ' + str(np.shape(points)))
-				print('POINT'+str(points))
-				img_count = write_crop_images(img, points, img_count)
+				#print('points: ' + str(np.shape(points)))
+				print('POINT'+str(rescaled_points))
+				img_count = write_crop_images(img, rescaled_points, img_count)
 				print('img_count: ' + str(img_count))
 				print('PRINTED')
 				print_number += 1
