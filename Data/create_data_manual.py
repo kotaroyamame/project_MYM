@@ -150,7 +150,7 @@ def write_crop_images(img, points, img_count, folder_path='./raw_data/',X=9):
 					row_upper = points[rowi]
 					row_lower = points[rowi + 1]
 					#print('row',row)
-					for s in range(len(row_lower)-2):
+					for s in range(len(row_lower)-1):
 						# ratio_h = 2
 						# ratio_w = 1
 						#print('s',s)
