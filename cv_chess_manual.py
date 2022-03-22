@@ -49,7 +49,7 @@ def natural_keys(text):
 
 print('read h5')
 # Load in the CNN model
-model = load_model('model_VGG16_weight.h5')
+model = load_model('model_VGG16_weight_empty.h5')
 print('end h5')
 # Select the live video stream source (0-webcam & 1-GoPro)
 #cap = cv2.VideoCapture(0)
@@ -65,7 +65,7 @@ print('endfen')
 while(True):
 		# Capture frame-by-frame
 		#ret, frame = cap.read()
-		frame = cv2.imread('frame41.jpeg')
+		frame = cv2.imread('current.jpeg')
 		#frame = undistort(frame)
 		#camera,dist=get_calibration_data()
 		frame = cv2.convertScaleAbs(frame,alpha = 1.1,beta=-30)
@@ -76,9 +76,10 @@ while(True):
 		# frame = dst
 		# Resizes each frame
 		# small_frame = rescale_frame(frame)
-		cv2.polylines(frame, [ptl] ,False,(200,10,10))
+		frame_view = frame
+		cv2.polylines(frame_view, [ptl] ,False,(200,10,10))
 		# Display the resulting frame
-		cv2.imshow('live', frame)
+		cv2.imshow('live', frame_view)
 
 		if cv2.waitKey(1) & 0xFF == ord(' '):
 				if len(pt)!=6:
@@ -114,14 +115,9 @@ while(True):
 						point = (int(__point[0]),int(__point[1]))
 						cv2.drawMarker(frame2, position=point, color=(0, 0, 255))
 				# Final coordinates of the board
-				points = augment_points(points)
+				#points = augment_points(points)
 				cv2.imwrite('frame2.jpeg', frame2)
-				sys.exit(0)
-				print(points)
-				for _point in points:
-					point = (int(_point[0]),int(_point[1]))
-					cv2.drawMarker(frame2, position=point, color=(255, 0, 0))
-				cv2.imwrite('frame2.jpeg', frame2)
+				#print(points)
 				# Crop the squares of the board a organize into a sorted list
 				x_list = write_crop_images(img, points, 0)
 				img_filename_list = grab_cell_files()

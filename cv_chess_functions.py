@@ -14,6 +14,7 @@ from PIL import Image
 import re
 import glob
 import PIL
+import os
 def linear_func(x1,y1,x2,y2):
     a = (y2-y1)/(x2-x1)
     b=y1-a*x1
@@ -267,37 +268,59 @@ def augment_points(points):
     return augmented_points
 
 
-# Crop board into separate images and write to folder
-def write_crop_images(img, points, img_count=0, folder_path='./Data/raw_data/'):
-    num_list = []
-    shape = list(np.shape(points))
-    start_point = shape[0] - 14
-    print('int(shape[0] / 11)'+str(int(shape[0] / 11)))
-    if int(shape[0] / 11) >= 8:
-        range_num = 8
-    else:
-        range_num = int((shape[0] / 11) - 2)
+# Crop board into separate images
+def write_crop_images(img, points, img_count, folder_path='./raw_data/',X=9):
+                num_list = []
+                shape = list(np.shape(points))
+                start_point = shape[0]
+                print('start_point',start_point)
+                # if int(shape[0] / X) >= 8:
+                # 				range_num = 8
+                # else:
+                # 				range_num = int((shape[0] / X) - 2)
 
-    for row in range(range_num):
-        start = start_point - (row * 11)
-        end = (start_point - 8) - (row * 11)
-        num_list.append(range(start, end, -1))
-    print('num_list:'+str(num_list))
-    for row in num_list:
-        for s in row:
-            # ratio_h = 2
-            # ratio_w = 1
-            base_len = math.dist(points[s], points[s + 1])
-            bot_left, bot_right = points[s], points[s + 1]
-            start_x, start_y = int(bot_left[0]), int(bot_left[1] - (base_len * 2))
-            end_x, end_y = int(bot_right[0]), int(bot_right[1])
-            if start_y < 0:
-                start_y = 0
-            cropped = img[start_y: end_y, start_x: end_x]
-            img_count += 1
-            cv2.imwrite(folder_path + str(img_count) + '.jpeg', cropped)
-            # print(folder_path + 'data' + str(img_count) + '.jpeg')
-    return img_count
+                # for row in range(range_num):
+                # 				start = start_point - (row * X)
+                # 				end = (start_point - 8) - (row * X)
+                # 				num_list.append(range(start, end, -1))
+                print(len(points))
+                for rowi in range(len(points)-1):
+                    row_upper = points[rowi]
+                    row_lower = points[rowi + 1]
+                    print('row',rowi)
+                    for s in range(len(row_lower)-1):
+                        # ratio_h = 2
+                        # ratio_w = 1
+                        # print('s',s)
+                        # print('points',len(rowi),rowi[s])
+                        '''
+                        base_len = math.dist(row[s], row[s + 1])
+                        bot_left, bot_right = row[s], row[s + 1]
+                        hoo = np.array(bot_right) - np.array( bot_left)
+                        if hoo[0]<=0 or hoo[1]<=0:
+                            continue
+                        '''
+                        #start_x, start_y = int(bot_left[0]), int(bot_left[1] - (base_len * 2))
+                        #end_x, end_y = int(bot_right[0]), int(bot_right[1])
+                        start_x = int(min(row_lower[s][0], row_lower[s + 1][0], row_upper[s][0], row_upper[s + 1][0]))
+                        end_x = int(max(row_lower[s][0], row_lower[s + 1][0], row_upper[s][0], row_upper[s + 1][0]))
+                        start_y = int(min(row_lower[s][1], row_lower[s + 1][1], row_upper[s][1], row_upper[s + 1][1]))
+                        end_y = int(max(row_lower[s][1], row_lower[s + 1][1], row_upper[s][1], row_upper[s + 1][1]))
+                        start_y = int(1.5 * start_y - 0.5 * end_y)
+                        print(start_x)
+                        if start_y < 0:
+                                        start_y = 0
+                        print('start_y, end_y, start_x, end_x',start_y, end_y, start_x, end_x)
+                        print(np.shape(img))
+                        cropped = img[start_y: end_y, start_x: end_x]
+                        print('np.shape(cropped)',np.shape(cropped))
+                        if np.shape(cropped)[1]<=1:
+                            continue
+                        img_count += 1
+                        print("cropped",cropped,len(cropped),np.shape(cropped))
+                        os.makedirs(folder_path, exist_ok=True)
+                        cv2.imwrite(folder_path + str(img_count) + '.jpeg', cropped)
+                return img_count
 
 
 # Crop board into separate images and shows
@@ -363,7 +386,7 @@ def natural_keys(text):
 
 
 # Reads in the cropped images to a list
-def grab_cell_files(folder_name='./Data/raw_data/*'):
+def grab_cell_files(folder_name='./raw_data/*'):
     img_filename_list = []
     for path_name in glob.glob(folder_name):
         img_filename_list.append(path_name)
@@ -373,8 +396,7 @@ def grab_cell_files(folder_name='./Data/raw_data/*'):
 
 # Classifies each square and outputs the list in Forsyth-Edwards Notation (FEN)
 def classify_cells(model, img_filename_list):
-    category_reference = {0: 'b', 1: 'k', 2: 'n', 3: 'p', 4: 'q', 5: 'r', 6: '1', 7: 'B', 8: 'K', 9: 'N', 10: 'P',
-                          11: 'Q', 12: 'R'}
+    category_reference = {0: '1', 1: 'K'}
     pred_list = []
     for filename in img_filename_list:
         img = prepare_image(filename)
@@ -401,6 +423,7 @@ def classify_cells(model, img_filename_list):
 
 # Converts the FEN into a PNG file
 def fen_to_image(fen):
+    print("fen:"+fen)
     board = chess.Board(fen)
     current_board = chess.svg.board(board=board)
 
