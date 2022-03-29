@@ -13,7 +13,7 @@ from collections import defaultdict
 from statistics import mean
 import os
 from cv_chess_functions import (points_by_points_with_twopoint_perspective, read_img,
-															 augment_points, undistort,)
+															 augment_points, undistort,write_crop_images)
 pt=[]
 n=0
 #マウスの操作があるとき呼ばれる関数
@@ -128,67 +128,6 @@ def augment_points(points):
 	augmented_points = sorted(augmented_points, key=lambda k: [k[1], k[0]])
 	return augmented_points
 
-
-# Crop board into separate images
-def write_crop_images(img, points, img_count, folder_path='./raw_data/',X=9,up_extend=0.1,down_extend=0.1,right_extend=0.1,left_extend=0.1):
-				num_list = []
-				shape = list(np.shape(points))
-				start_point = shape[0]
-				print('start_point',start_point)
-				# if int(shape[0] / X) >= 8:
-				# 				range_num = 8
-				# else:
-				# 				range_num = int((shape[0] / X) - 2)
-
-				# for row in range(range_num):
-				# 				start = start_point - (row * X)
-				# 				end = (start_point - 8) - (row * X)
-				# 				num_list.append(range(start, end, -1))
-
-
-				for rowi in range(len(points)-1):
-					row_upper = points[rowi]
-					row_lower = points[rowi + 1]
-					#print('row',row)
-					for s in range(len(row_lower)-1):
-						# ratio_h = 2
-						# ratio_w = 1
-						#print('s',s)
-						#print('points',len(row),row[s])
-						'''
-						base_len = math.dist(row[s], row[s + 1])
-						bot_left, bot_right = row[s], row[s + 1]
-						hoo = np.array(bot_right) - np.array( bot_left)
-						if hoo[0]<=0 or hoo[1]<=0:
-							continue
-						'''
-						#start_x, start_y = int(bot_left[0]), int(bot_left[1] - (base_len * 2))
-						#end_x, end_y = int(bot_right[0]), int(bot_right[1])
-						start_x = int(min(row_lower[s][0], row_lower[s + 1][0], row_upper[s][0], row_upper[s + 1][0]))
-						end_x = int(max(row_lower[s][0], row_lower[s + 1][0], row_upper[s][0], row_upper[s + 1][0]))
-						start_y = int(min(row_lower[s][1], row_lower[s + 1][1], row_upper[s][1], row_upper[s + 1][1]))
-						end_y = int(max(row_lower[s][1], row_lower[s + 1][1], row_upper[s][1], row_upper[s + 1][1]))
-						dx = end_x - start_x
-						dy = end_y - start_y
-						start_x = int(max(0, start_x - dx * left_extend))
-						end_x = int(min(img.shape[0], end_x + dx * right_extend))
-						start_y = int(max(0, start_y - dy * up_extend))
-						end_y = int(min(img.shape[1], end_y + dy * down_extend))
-						#print('start_y, end_y, start_x, end_x',start_y, end_y, start_x, end_x)
-						#print(np.shape(img))
-						cropped = img[start_y: end_y, start_x: end_x]
-						#print('np.shape(cropped)',np.shape(cropped))
-						if np.shape(cropped)[1]<=1:
-							continue
-						img_count += 1
-						#print("cropped",cropped,len(cropped),np.shape(cropped))
-						os.makedirs('./test_data', exist_ok=True)
-						cv2.imwrite('./test_data/crop_data_image' + str(img_count) + '.jpeg', cropped)
-						#cv2.imwrite('./test_data/crop_data_image' + str(img_count) + '.jpeg', cropped)
-						#print(folder_path + 'data' + str(img_count) + '.jpeg')
-				return img_count
-
-
 # Create a list of image file names
 img_filename_list = []
 folder_name = './bordimg/*'
@@ -256,7 +195,7 @@ for file_name in img_filename_list:
 
 				#print('points: ' + str(np.shape(points)))
 				print('POINT'+str(rescaled_points))
-				img_count = write_crop_images(img, rescaled_points, img_count)
+				img_count = write_crop_images(img, rescaled_points, img_count,'./test_data/')
 				print('img_count: ' + str(img_count))
 				print('PRINTED')
 				print_number += 1
