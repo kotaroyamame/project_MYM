@@ -15,6 +15,8 @@ import re
 import glob
 import PIL
 import os
+from keras.models import load_model
+from calibration import get_calibration_data
 def linear_func(x1,y1,x2,y2):
     a = (y2-y1)/(x2-x1)
     b=y1-a*x1
@@ -269,7 +271,7 @@ def augment_points(points):
 
 
 # Crop board into separate images
-def write_crop_images(img, points, img_count, folder_path='./raw_data/',X=9):
+def write_crop_images(img, points, img_count, folder_path='./raw_data/',X=9,up_extend=0.1,down_extend=0.1,right_extend=0.1,left_extend=0.1):
                 num_list = []
                 shape = list(np.shape(points))
                 start_point = shape[0]
@@ -283,16 +285,17 @@ def write_crop_images(img, points, img_count, folder_path='./raw_data/',X=9):
                 # 				start = start_point - (row * X)
                 # 				end = (start_point - 8) - (row * X)
                 # 				num_list.append(range(start, end, -1))
-                print(len(points))
+
+
                 for rowi in range(len(points)-1):
                     row_upper = points[rowi]
                     row_lower = points[rowi + 1]
-                    print('row',rowi)
+                    #print('row',row)
                     for s in range(len(row_lower)-1):
                         # ratio_h = 2
                         # ratio_w = 1
-                        # print('s',s)
-                        # print('points',len(rowi),rowi[s])
+                        #print('s',s)
+                        #print('points',len(row),row[s])
                         '''
                         base_len = math.dist(row[s], row[s + 1])
                         bot_left, bot_right = row[s], row[s + 1]
@@ -306,20 +309,25 @@ def write_crop_images(img, points, img_count, folder_path='./raw_data/',X=9):
                         end_x = int(max(row_lower[s][0], row_lower[s + 1][0], row_upper[s][0], row_upper[s + 1][0]))
                         start_y = int(min(row_lower[s][1], row_lower[s + 1][1], row_upper[s][1], row_upper[s + 1][1]))
                         end_y = int(max(row_lower[s][1], row_lower[s + 1][1], row_upper[s][1], row_upper[s + 1][1]))
-                        start_y = int(1.5 * start_y - 0.5 * end_y)
-                        print(start_x)
-                        if start_y < 0:
-                                        start_y = 0
-                        print('start_y, end_y, start_x, end_x',start_y, end_y, start_x, end_x)
-                        print(np.shape(img))
+                        dx = end_x - start_x
+                        dy = end_y - start_y
+                        start_x = int(max(0, start_x - dx * left_extend))
+                        end_x = int(min(img.shape[0], end_x + dx * right_extend))
+                        start_y = int(max(0, start_y - dy * up_extend))
+                        end_y = int(min(img.shape[1], end_y + dy * down_extend))
+                        #print('start_y, end_y, start_x, end_x',start_y, end_y, start_x, end_x)
+                        #print(np.shape(img))
                         cropped = img[start_y: end_y, start_x: end_x]
-                        print('np.shape(cropped)',np.shape(cropped))
+                        #print('np.shape(cropped)',np.shape(cropped))
                         if np.shape(cropped)[1]<=1:
                             continue
                         img_count += 1
-                        print("cropped",cropped,len(cropped),np.shape(cropped))
+                        #print("cropped",cropped,len(cropped),np.shape(cropped))
                         os.makedirs(folder_path, exist_ok=True)
-                        cv2.imwrite(folder_path + str(img_count) + '.jpeg', cropped)
+                        cv2.imwrite(folder_path + 'crop_data_image' + str(img_count) + '.jpeg', cropped)
+                        #cv2.imwrite(folder_path + str(img_count) + '.jpeg', cropped)
+                        #cv2.imwrite('./test_data/crop_data_image' + str(img_count) + '.jpeg', cropped)
+                        #print(folder_path + 'data' + str(img_count) + '.jpeg')
                 return img_count
 
 
@@ -394,12 +402,18 @@ def grab_cell_files(folder_name='./raw_data/*'):
     return img_filename_list
 
 
+
+
+
+
 # Classifies each square and outputs the list in Forsyth-Edwards Notation (FEN)
 def classify_cells(model, img_filename_list):
     category_reference = {0: '1', 1: 'K'}
     pred_list = []
     for filename in img_filename_list:
         img = prepare_image(filename)
+        img *= 1./255
+        #print(img)
         out = model.predict(img)
         top_pred = np.argmax(out)
         pred = category_reference[top_pred]
@@ -420,6 +434,40 @@ def classify_cells(model, img_filename_list):
     fen = fen.replace('D', '')
     return fen
 
+# Classifies each square and outputs the list in Forsyth-Edwards Notation (FEN)
+def classify_cells_to_array(model, img_filename_list):
+    pred_list = []
+    is_exist = np.zeros((8,8), dtype=bool)
+    for filename in img_filename_list:
+        img = prepare_image(filename)
+        img *= 1./255
+        #print(img)
+        out = model.predict(img)
+        top_pred = np.argmax(out)
+        pred_list.append(top_pred)
+    for i, val in enumerate(pred_list):
+        if val == 1:
+            is_exist[i % 8][i // 8] = True
+    return is_exist
+
+def piece_detect(_frame,filepath=os.path.dirname(__file__)+'/corner.npy'):
+    print('piece_detect:')
+    model = load_model(os.path.dirname(__file__)+'/model_VGG16_weight_empty.h5')
+    print('loaded model')
+    camera,dist=get_calibration_data()
+    frame = cv2.convertScaleAbs(_frame,alpha = 1.1,beta=-30)
+    frame = undistort(img=frame,DIM=(640, 480),K=np.array(camera),D=np.array(dist))
+    print('preprocessed')
+    cv2.imwrite('frame.jpeg', frame)
+    img, gray_blur = read_img('frame.jpeg')
+    write_crop_images(img, np.load(filepath), 0)
+    print('cropped')
+    img_filename_list = grab_cell_files()
+    img_filename_list.sort(key=natural_keys)
+    is_exist = classify_cells_to_array(model, img_filename_list)
+    print('classified')
+    print(is_exist)
+    return is_exist
 
 # Converts the FEN into a PNG file
 def fen_to_image(fen):
@@ -440,3 +488,8 @@ def undistort(img=None,DIM=(1920, 1080),K=np.array([[  1.08515378e+03,   0.00000
     # h,w = img.shape[:2]
     map1, map2 = cv2.initUndistortRectifyMap(K, D, np.eye(3), K, DIM, cv2.CV_16SC2)
     return cv2.remap(img, map1, map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+
+if __name__ == '__main__':
+    cap = cv2.VideoCapture(0)	
+    ret, frame = cap.read()
+    piece_detect(frame)
