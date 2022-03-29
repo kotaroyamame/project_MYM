@@ -122,8 +122,8 @@ def points_by_points_with_twopoint_perspective(points,X=9):
     if points[4][0]>points[5][0]:
         points[4],points[5]=points[5],points[4]
     
-    horizontal_lines=partition_by_ratio(points[0],points[2],points[4],points[5],points[1],X)
-    vertical_lines=partition_by_ratio(points[0],points[4],points[2],points[5],points[3],X)
+    vertical_lines=partition_by_ratio(points[0],points[2],points[4],points[5],points[1],X)
+    horizontal_lines=partition_by_ratio(points[0],points[4],points[2],points[5],points[3],X)
     ret_points = np.zeros([9,9,2])
     for i in range(X):
         for j in range(X):
@@ -447,7 +447,7 @@ def classify_cells_to_array(model, img_filename_list):
         pred_list.append(top_pred)
     for i, val in enumerate(pred_list):
         if val == 1:
-            is_exist[i % 8][i // 8] = True
+            is_exist[i // 8][i % 8] = True
     return is_exist
 
 def piece_detect(_frame,filepath=os.path.dirname(__file__)+'/corner.npy'):
