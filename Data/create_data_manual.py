@@ -130,7 +130,7 @@ def augment_points(points):
 
 
 # Crop board into separate images
-def write_crop_images(img, points, img_count, folder_path='./raw_data/',X=9):
+def write_crop_images(img, points, img_count, folder_path='./raw_data/',X=9,up_extend=0.1,down_extend=0.1,right_extend=0.1,left_extend=0.1):
 				num_list = []
 				shape = list(np.shape(points))
 				start_point = shape[0]
@@ -168,22 +168,24 @@ def write_crop_images(img, points, img_count, folder_path='./raw_data/',X=9):
 						end_x = int(max(row_lower[s][0], row_lower[s + 1][0], row_upper[s][0], row_upper[s + 1][0]))
 						start_y = int(min(row_lower[s][1], row_lower[s + 1][1], row_upper[s][1], row_upper[s + 1][1]))
 						end_y = int(max(row_lower[s][1], row_lower[s + 1][1], row_upper[s][1], row_upper[s + 1][1]))
-						start_y = int(1.5 * start_y - 0.5 * end_y)
-						print(start_x)
-						if start_y < 0:
-										start_y = 0
-						print('start_y, end_y, start_x, end_x',start_y, end_y, start_x, end_x)
-						print(np.shape(img))
+						dx = end_x - start_x
+						dy = end_y - start_y
+						start_x = int(max(0, start_x - dx * left_extend))
+						end_x = int(min(img.shape[0], end_x + dx * right_extend))
+						start_y = int(max(0, start_y - dy * up_extend))
+						end_y = int(min(img.shape[1], end_y + dy * down_extend))
+						#print('start_y, end_y, start_x, end_x',start_y, end_y, start_x, end_x)
+						#print(np.shape(img))
 						cropped = img[start_y: end_y, start_x: end_x]
-						print('np.shape(cropped)',np.shape(cropped))
+						#print('np.shape(cropped)',np.shape(cropped))
 						if np.shape(cropped)[1]<=1:
 							continue
 						img_count += 1
-						print("cropped",cropped,len(cropped),np.shape(cropped))
+						#print("cropped",cropped,len(cropped),np.shape(cropped))
 						os.makedirs('./test_data', exist_ok=True)
 						cv2.imwrite('./test_data/crop_data_image' + str(img_count) + '.jpeg', cropped)
 						#cv2.imwrite('./test_data/crop_data_image' + str(img_count) + '.jpeg', cropped)
-						print(folder_path + 'data' + str(img_count) + '.jpeg')
+						#print(folder_path + 'data' + str(img_count) + '.jpeg')
 				return img_count
 
 
