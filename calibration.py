@@ -5,8 +5,8 @@ import os
 import glob
 
 CHECKERBOARD = (7,10)
-CAMERA_FILE='camera.csv'
-DIST_FILE='dis.csv'
+CAMERA_FILE=os.path.dirname(__file__)+'/camera.csv'
+DIST_FILE=os.path.dirname(__file__)+'/dis.csv'
 print(CHECKERBOARD)
 import numpy as np
 import cv2
@@ -100,3 +100,6 @@ def get_calibration_data():
 	except Exception as e:
 		raise e
 	return camera, dist
+
+if __name__ == '__main__':
+	do_main()
