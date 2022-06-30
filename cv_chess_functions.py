@@ -18,9 +18,11 @@ import PIL
 import os
 from keras.models import load_model
 from keras.preprocessing import image
+from keras.utils import load_img
 from calibration import get_calibration_data
 from tensorflow import keras
 from tensorflow.keras import layers
+import tensorflow as tf
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import ProcessPoolExecutor
 import time
@@ -300,7 +302,6 @@ def write_crop_images(img, points, img_count, folder_path='./raw_data/',X=9,up_e
                     row_lower = points[rowi + 1]
                     #print('row',row)
                     for s in range(len(row_lower)-1):
-                        # ratio_h = 2
                         # ratio_w = 1
                         #print('s',s)
                         #print('points',len(row),row[s])
@@ -509,7 +510,8 @@ def classify_cells_to_array(model, img_filename_list):
         img = prepare_image(filename)
         img *= 1./255
         #print(img)
-        out = model.predict(img)
+        #out=np.array((0,0))
+        out = model.predict(img,verbose=0)
         top_pred = np.argmax(out)
         pred_list.append(top_pred)
         #os.makedirs('./predicted_data', exist_ok=True)
@@ -523,25 +525,48 @@ def classify_cells_to_array(model, img_filename_list):
     return is_exist
 
 # Classifies each square and outputs the list in Forsyth-Edwards Notation (FEN)
-def classify_cells_to_array_simul(model, img_filename_list):
+def classify_cells_to_array_simul_multi(model, img_filename_list,executor):
     pred_list = []
     is_exist = np.zeros((8,8), dtype=bool)
     img_list = np.zeros((64,224,224,3),dtype=float)
     index = 0
     outs = []
     #print(np.shape(img_list))
+    imgs = []
+    start=time.time()
+    '''
     for filename in img_filename_list:
+        #imgs.append(PIL.Image.open(filename).resize((224,224)))
+        stap=time.time()
         img = prepare_image(filename)
+        print('append:',(time.time()-stap)*64)
         img *= 1./255
         #print(np.shape(img))
-        #img_list[index] = img[0]
-        outs.append(model(img,training=False))
+        img_list[index] = img[0]
+        #img_list=np.append(img_list, img,axis=0)
+        #print(np.shape(img_list[index]))
+        #outs.append(model(img,training=False))
         index += 1
         #print(np.shape(img_list))
+        #print(img_list)
+    '''
+    predict_index=0
+    for img in list(executor.map(prepare_image, img_filename_list)):
+        img *= 1./255
+        img_list[predict_index] = img[0]
+        predict_index += 1
+    end=time.time()
+    print("image_prepare_time:",end-start)
     #print(img_list)
-    print(np.shape(img_list))
-    #outs = model.predict(img_list,batch_size=8,workers=2,use_multiprocessing=True)
-    #outs = model(img_list,batch_size=8,training=False)
+    #print(np.shape(img_list))
+    #gen = tf.keras.preprocessing.image.ImageDataGenerator()
+    #gen = gen.flow(img_list,batch_size=64)
+    start=time.time()
+    outs = model.predict(img_list,verbose=1,batch_size=16,workers=4,use_multiprocessing=True)
+    #outs = model.predict_generator(gen,verbose=1,workers=16,use_multiprocessing=True)
+    end=time.time()
+    #print("prediction_time:",end-start)
+    #outs = model(img_list,training=False)
     for out in outs:
         top_pred = np.argmax(out)
         pred_list.append(top_pred)
@@ -550,37 +575,86 @@ def classify_cells_to_array_simul(model, img_filename_list):
             is_exist[i // 8][i % 8] = True
     return is_exist
 
-model = load_model(os.path.dirname(__file__)+'/model_VGG16_weight_empty_log10.h5')
-print('loaded')
+
+# Classifies each square and outputs the list in Forsyth-Edwards Notation (FEN)
+def classify_cells_to_array_simul(model, img_filename_list):
+    pred_list = []
+    is_exist = np.zeros((8,8), dtype=bool)
+    img_list = np.zeros((64,224,224,3),dtype=float)
+    index = 0
+    outs = []
+    #print(np.shape(img_list))
+    start=time.time()
+    for filename in img_filename_list:
+        img = prepare_image(filename)
+        img *= 1./255
+        #print(np.shape(img))
+        img_list[index] = img[0]
+        #outs.append(model(img,training=False))
+        index += 1
+        #print(np.shape(img_list))
+    end=time.time()
+    print("image_prepare_time:",end-start)
+    #print(img_list)
+    #print(np.shape(img_list))
+    start=time.time()
+    outs = model.predict(img_list,verbose=1,batch_size=8,workers=4,use_multiprocessing=True)
+    end=time.time()
+    #print("prediction_time:",end-start)
+    #outs = model(img_list,training=False)
+    for out in outs:
+        top_pred = np.argmax(out)
+        pred_list.append(top_pred)
+    for i, val in enumerate(pred_list):
+        if val == 1:
+            is_exist[i // 8][i % 8] = True
+    return is_exist
+
+#model = load_model(os.path.dirname(__file__)+'/model_VGG16_weight_empty_log10.h5')
+#print('loaded')
 
 def predict(img):
     #time.sleep(1.0)
     #return 1
-    pred = model.predict(img)
+    pred = model.predict(img,verbose=0)
     print(np.argmax(pred))
     return np.argmax(pred)
 
+def predict_with_model(img,model):
+    #time.sleep(1.0)
+    #return 1
+    pred = model.predict(img,verbose=0)
+    print(np.argmax(pred))
+    return np.argmax(pred)
 
 class model_iter:
     #def __init__(self):
     def __getitem__(self, index):
         return 
 
-def classify_cells_to_array_multi(img_filename_list, executor):
+def classify_cells_to_array_multi(img_filename_list, executor,models):
     pred_list = []
     is_exist = np.zeros((8,8), dtype=bool)
     images = []
+    arg_tuples=[]
+    index = 0
     for filename in img_filename_list:
         img = prepare_image(filename)
         img *= 1./255
-        images.append(img)
+        #images.append(img)
+        arg_tuples.append((img,models[index]))
+        index += 1
     models = model_iter()
     pred_list = []
     print('multi_process start')
     #with ProcessPoolExecutor() as e:
-      #for pred in list(e.map(predict, images, models)):
-    for pred in list(executor.map(predict, images)):
+      #for pred in list(e.map(predict_with_model, images, models)):
+        #pred_list.append(pred)
+    #for pred in list(executor.map(predict, images)):
         #print('pred',pred)
+        #pred_list.append(pred)
+    for pred in list(executor.map(predict_with_model, arg_tuples)):
+        print('pred',pred)
         pred_list.append(pred)
     print(pred_list)
     for i, val in enumerate(pred_list):
@@ -739,13 +813,15 @@ def read_img_and_rescale(file, points):
 
 	points *= imgScale
 	return img, gray_blur
-
+'''
 def piece_detect(_frame,executor=None,filepath=os.path.dirname(__file__)+'/corner.npy'):
 #def piece_detect(_frame,filepath=os.path.dirname(__file__)+'/corner.npy'):
     print('piece_detect:')
-    model = load_model(os.path.dirname(__file__)+'/model_VGG16_weight_empty_log10.h5')
+    #model = load_model(os.path.dirname(__file__)+'/model_VGG16_weight_empty_log10.h5')
+    #models = []
     #for i in range(64):
-        #model[i] = load_model(os.path.dirname(__file__)+'/model_VGG16_weight_empty_log10.h5')
+        #print(i)
+        #models.append(load_model(os.path.dirname(__file__)+'/model_VGG16_weight_empty_log10.h5'))
     print('loaded model')
     #camera,dist=get_calibration_data()
     #frame = cv2.convertScaleAbs(_frame,alpha = 1.2,beta=+15)
@@ -763,21 +839,27 @@ def piece_detect(_frame,executor=None,filepath=os.path.dirname(__file__)+'/corne
     #pre_filter = piece_filter_high_canny(corners, img)
     #print(pre_filter)
     #is_exist = classify_cells_to_array(model, img_filename_list)
+    is_exist = classify_cells_to_array(models[13], img_filename_list)
     #print('simul')
     #is_exist = classify_cells_to_array_simul(model, img_filename_list)
-    #is_exist = classify_cells_to_array_multi(img_filename_list,executor)
+    #is_exist = classify_cells_to_array_multi(img_filename_list,executor,models)
     end = time.time()
     print('time',end-start)
 
     print('classified')
     print(is_exist)
     return is_exist
-
+'''
 def piece_detect_test(executor=None,filepath=os.path.dirname(__file__)+'/corner.npy'):
 #def piece_detect(_frame,filepath=os.path.dirname(__file__)+'/corner.npy'):
-    executor = ProcessPoolExecutor(4)
+    executor = ProcessPoolExecutor(8)
     #executor = ThreadPoolExecutor(4)
     model = load_model(os.path.dirname(__file__)+'/model_VGG16_weight_empty_log10.h5')
+    models = []
+    #for i in range(64):
+        #print(len(models))
+        #models.append(load_model(os.path.dirname(__file__)+'/model_VGG16_weight_empty_log10.h5'))
+    #models[3] = None
     while True:
         print('piece_detect:')
         #for i in range(64):
@@ -798,9 +880,12 @@ def piece_detect_test(executor=None,filepath=os.path.dirname(__file__)+'/corner.
         start = time.time()
         #pre_filter = piece_filter_high_canny(corners, img)
         #print(pre_filter)
-        is_exist = classify_cells_to_array(model, img_filename_list)
+        #is_exist = classify_cells_to_array(models[13], img_filename_list)
+        #is_exist = classify_cells_to_array(models[3], img_filename_list)
+        #is_exist = classify_cells_to_array(model, img_filename_list)
         #is_exist = classify_cells_to_array_simul(model, img_filename_list)
-        #is_exist = classify_cells_to_array_multi(img_filename_list,executor)
+        is_exist = classify_cells_to_array_simul_multi(model, img_filename_list,executor)
+        #is_exist = classify_cells_to_array_multi(img_filename_list,executor,models)
         end = time.time()
         print('time',end-start)
 
