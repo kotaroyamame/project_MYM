@@ -1,3 +1,4 @@
+from audioop import mul
 from configparser import ExtendedInterpolation
 import math
 import cv2
@@ -16,7 +17,14 @@ import glob
 import PIL
 import os
 from keras.models import load_model
+from keras.preprocessing import image
 from calibration import get_calibration_data
+from tensorflow import keras
+from tensorflow.keras import layers
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
+import time
+import copy
 def linear_func(x1,y1,x2,y2):
     a = (y2-y1)/(x2-x1)
     b=y1-a*x1
@@ -312,9 +320,9 @@ def write_crop_images(img, points, img_count, folder_path='./raw_data/',X=9,up_e
                         dx = end_x - start_x
                         dy = end_y - start_y
                         start_x = int(max(0, start_x - dx * left_extend))
-                        end_x = int(min(img.shape[0], end_x + dx * right_extend))
+                        end_x = int(min(img.shape[1], end_x + dx * right_extend))
                         start_y = int(max(0, start_y - dy * up_extend))
-                        end_y = int(min(img.shape[1], end_y + dy * down_extend))
+                        end_y = int(min(img.shape[0], end_y + dy * down_extend))
                         #print('start_y, end_y, start_x, end_x',start_y, end_y, start_x, end_x)
                         #print(np.shape(img))
                         cropped = img[start_y: end_y, start_x: end_x]
@@ -361,6 +369,13 @@ def x_crop_images(img, points):
             # print(folder_path + 'data' + str(img_count) + '.jpeg')
     return img_list
 
+def rescale(img):
+    W = 1000
+    height, width, depth = img.shape
+    #imgScale = width 
+    imgScale = W / width
+    newX, newY = img.shape[1] * imgScale, img.shape[0] * imgScale
+    img = cv2.resize(img, (int(newX), int(newY)))
 
 # Convert image from RGB to BGR
 def convert_image_to_bgr_numpy_array(image_path, size=(224, 224)):
@@ -369,6 +384,7 @@ def convert_image_to_bgr_numpy_array(image_path, size=(224, 224)):
     # swap R and B channels
     img_data = np.flip(img_data, axis=2)
     return img_data
+
 
 
 # Adjust image into (1, 224, 224, 3)
@@ -404,7 +420,58 @@ def grab_cell_files(folder_name='./raw_data/*'):
 
 
 
-
+def classify_cells_pre_keras(model, img_filename_list): 
+    img_width, img_height = 224, 224
+    pred_list = []
+    category_reference = {0: '1', 1: 'K'}
+    
+    for image_name in img_filename_list:
+            img_predict = []
+            img = Image.open(image_name)
+            img = img.convert("RGB")
+            img = img.resize((img_width, img_height))
+            img_array = np.array(img, dtype=float)
+            img_predict.append(img_array)
+            for i in range(len(img_predict)):
+                img_predict[i] *= 1./255
+            img_predict = np.array(img_predict, dtype=float)
+            out = model.predict(img_predict)
+            print(out)
+            top_pred = np.argmax(out)
+            pred = category_reference[top_pred]
+            pred_list.append(pred)
+    '''
+    img_predict = []
+    for image_name in img_filename_list:
+            img = Image.open(image_name)
+            img = img.convert("RGB")
+            img = img.resize((img_width, img_height))
+            img_array = np.asarray(img, dtype=float)
+            for i in range(len(img_array)):
+                img_array[i] *= 1./255
+            img_predict.append(img_array)
+            
+    img_predict = np.asarray(img_predict)
+    out = model.predict(img_predict)
+    for result in out:
+            top_pred = np.argmax(result)
+            pred = category_reference[top_pred]
+            pred_list.append(pred)
+    '''
+    fen = ''.join(pred_list)
+    fen = fen[::-1]
+    fen = '/'.join(fen[i:i + 8] for i in range(0, len(fen), 8))
+    sum_digits = 0
+    for i, p in enumerate(fen):
+        if p.isdigit():
+            sum_digits += 1
+        elif p.isdigit() is False and (fen[i - 1].isdigit() or i == len(fen)):
+            fen = fen[:(i - sum_digits)] + str(sum_digits) + ('D' * (sum_digits - 1)) + fen[i:]
+            sum_digits = 0
+    if sum_digits > 1:
+        fen = fen[:(len(fen) - sum_digits)] + str(sum_digits) + ('D' * (sum_digits - 1))
+    fen = fen.replace('D', '')
+    return fen
 
 # Classifies each square and outputs the list in Forsyth-Edwards Notation (FEN)
 def classify_cells(model, img_filename_list):
@@ -445,30 +512,319 @@ def classify_cells_to_array(model, img_filename_list):
         out = model.predict(img)
         top_pred = np.argmax(out)
         pred_list.append(top_pred)
+        #os.makedirs('./predicted_data', exist_ok=True)
+        #print('./predicted_data/' + filename[-7:-5] + "-" + str(top_pred) + '.jpeg')
+        #cv2.imwrite('./predicted_data/' + filename[-7:-5] + "-" + str(top_pred) + '.jpeg', cv2.imread(filename))
+        #print(out)
+
     for i, val in enumerate(pred_list):
         if val == 1:
             is_exist[i // 8][i % 8] = True
     return is_exist
 
-def piece_detect(_frame,filepath=os.path.dirname(__file__)+'/corner.npy'):
+# Classifies each square and outputs the list in Forsyth-Edwards Notation (FEN)
+def classify_cells_to_array_simul(model, img_filename_list):
+    pred_list = []
+    is_exist = np.zeros((8,8), dtype=bool)
+    img_list = np.zeros((64,224,224,3),dtype=float)
+    index = 0
+    outs = []
+    #print(np.shape(img_list))
+    for filename in img_filename_list:
+        img = prepare_image(filename)
+        img *= 1./255
+        #print(np.shape(img))
+        #img_list[index] = img[0]
+        outs.append(model(img,training=False))
+        index += 1
+        #print(np.shape(img_list))
+    #print(img_list)
+    print(np.shape(img_list))
+    #outs = model.predict(img_list,batch_size=8,workers=2,use_multiprocessing=True)
+    #outs = model(img_list,batch_size=8,training=False)
+    for out in outs:
+        top_pred = np.argmax(out)
+        pred_list.append(top_pred)
+    for i, val in enumerate(pred_list):
+        if val == 1:
+            is_exist[i // 8][i % 8] = True
+    return is_exist
+
+model = load_model(os.path.dirname(__file__)+'/model_VGG16_weight_empty_log10.h5')
+print('loaded')
+
+def predict(img):
+    #time.sleep(1.0)
+    #return 1
+    pred = model.predict(img)
+    print(np.argmax(pred))
+    return np.argmax(pred)
+
+
+class model_iter:
+    #def __init__(self):
+    def __getitem__(self, index):
+        return 
+
+def classify_cells_to_array_multi(img_filename_list, executor):
+    pred_list = []
+    is_exist = np.zeros((8,8), dtype=bool)
+    images = []
+    for filename in img_filename_list:
+        img = prepare_image(filename)
+        img *= 1./255
+        images.append(img)
+    models = model_iter()
+    pred_list = []
+    print('multi_process start')
+    #with ProcessPoolExecutor() as e:
+      #for pred in list(e.map(predict, images, models)):
+    for pred in list(executor.map(predict, images)):
+        #print('pred',pred)
+        pred_list.append(pred)
+    print(pred_list)
+    for i, val in enumerate(pred_list):
+        if val == 1:
+            is_exist[i // 8][i % 8] = True
+    
+    return is_exist
+
+def isClockwise(x1, y1, x2, y2, x3, y3):
+  return (x2 - x1) * (y3 - y2) - (y2 - y1) * (x3 - x2) > 10
+
+def piece_filter_low_canny(bound, chessboardImage):
+  areaOfCell = np.zeros((8,8), dtype=int)
+  diffAreaOfCell = np.zeros((8,8), dtype=int)
+  img = cv2.cvtColor(chessboardImage, cv2.COLOR_BGR2GRAY)
+  dst = cv2.Canny(img, 20, 40)
+  #dst = cv2.Laplacian(img, cv2.CV_8U, ksize=5)
+  cv2.imwrite('./drawDiff.jpg', dst)
+  for i in range(8):
+    for j in range(8):
+      b0x = bound[i][j][1] * 0.9 + bound[i+1][j+1][1] * 0.1
+      b0y = bound[i][j][0] * 0.9 + bound[i+1][j+1][0] * 0.1
+      b1x = bound[i+1][j][1] * 0.9 + bound[i][j+1][1] * 0.1
+      b1y = bound[i+1][j][0] * 0.9 + bound[i][j+1][0] * 0.1
+      b2x = bound[i+1][j+1][1] * 0.9 + bound[i][j][1] * 0.1
+      b2y = bound[i+1][j+1][0] * 0.9 + bound[i][j][0] * 0.1
+      b3x = bound[i][j+1][1] * 0.9 + bound[i+1][j][1] * 0.1
+      b3y = bound[i][j+1][0] * 0.9 + bound[i+1][j][0] * 0.1
+
+      ymin = math.ceil(min(b0y,b1y,b2y,b3y))
+      ymax = math.floor(max(b0y,b1y,b2y,b3y))
+      xmin = math.ceil(min(b0x,b1x,b2x,b3x))
+      xmax = math.floor(max(b0x,b1x,b2x,b3x))
+      for x in range(xmin,xmax+1):
+        for y in range(ymin,ymax+1):
+          c1 = isClockwise(b0x,b0y,b1x,b1y,x,y)
+          c2 = isClockwise(b1x,b1y,b2x,b2y,x,y)
+          c3 = isClockwise(b2x,b2y,b3x,b3y,x,y)
+          c4 = isClockwise(b3x,b3y,b0x,b0y,x,y)
+          if c1 == c2 == c3 == c4:
+            areaOfCell[i][j] += 1
+            if dst[x][y] > 125:
+              diffAreaOfCell[i][j] += 1
+  
+  ratio_threshold = 0.01
+  isExist = np.zeros((8,8), dtype=int)
+  print(diffAreaOfCell/areaOfCell)
+  for i in range(8):
+    for j in range(8):
+      isExist[i][j] = -1
+      if areaOfCell[i][j] * ratio_threshold >= diffAreaOfCell[i][j]:
+        isExist[i][j] = 0
+  return isExist
+
+def piece_filter_high_canny(bound, chessboardImage):
+  areaOfCell = np.zeros((8,8), dtype=int)
+  diffAreaOfCell = np.zeros((8,8), dtype=int)
+  img = cv2.cvtColor(chessboardImage, cv2.COLOR_BGR2GRAY)
+  dst = cv2.Canny(img, 40, 80)
+  #dst = cv2.Laplacian(img, cv2.CV_8U, ksize=5)
+  cv2.imwrite('./drawDiff.jpg', dst)
+  for i in range(8):
+    for j in range(8):
+      b0x = bound[i][j][1] * 0.9 + bound[i+1][j+1][1] * 0.1
+      b0y = bound[i][j][0] * 0.9 + bound[i+1][j+1][0] * 0.1
+      b1x = bound[i+1][j][1] * 0.9 + bound[i][j+1][1] * 0.1
+      b1y = bound[i+1][j][0] * 0.9 + bound[i][j+1][0] * 0.1
+      b2x = bound[i+1][j+1][1] * 0.9 + bound[i][j][1] * 0.1
+      b2y = bound[i+1][j+1][0] * 0.9 + bound[i][j][0] * 0.1
+      b3x = bound[i][j+1][1] * 0.9 + bound[i+1][j][1] * 0.1
+      b3y = bound[i][j+1][0] * 0.9 + bound[i+1][j][0] * 0.1
+
+      ymin = math.ceil(min(b0y,b1y,b2y,b3y))
+      ymax = math.floor(max(b0y,b1y,b2y,b3y))
+      xmin = math.ceil(min(b0x,b1x,b2x,b3x))
+      xmax = math.floor(max(b0x,b1x,b2x,b3x))
+      for x in range(xmin,xmax+1):
+        for y in range(ymin,ymax+1):
+          c1 = isClockwise(b0x,b0y,b1x,b1y,x,y)
+          c2 = isClockwise(b1x,b1y,b2x,b2y,x,y)
+          c3 = isClockwise(b2x,b2y,b3x,b3y,x,y)
+          c4 = isClockwise(b3x,b3y,b0x,b0y,x,y)
+          if c1 == c2 == c3 == c4:
+            areaOfCell[i][j] += 1
+            if dst[x][y] > 125:
+              diffAreaOfCell[i][j] += 1
+  
+  ratio_threshold = 0.1
+  isExist = np.zeros((8,8), dtype=int)
+  print(diffAreaOfCell/areaOfCell);
+  for i in range(8):
+    for j in range(8):
+      isExist[i][j] = -1
+      if areaOfCell[i][j] * ratio_threshold <= diffAreaOfCell[i][j]:
+        isExist[i][j] = 1
+  return isExist
+
+# Classifies each square and outputs the list in Forsyth-Edwards Notation (FEN)
+def classify_cells_to_array_with_filter(model, img_filename_list):
+    pred_list = []
+    is_exist = np.zeros((8,8), dtype=bool)
+    for filename in img_filename_list:
+        img = prepare_image(filename)
+        img *= 1./255
+        out = model.predict(img)
+        top_pred = np.argmax(out)
+        pred_list.append(top_pred)
+
+    for i, val in enumerate(pred_list):
+        if val == 1:
+            is_exist[i // 8][i % 8] = True
+    return is_exist
+
+def classify_cells_pre_keras_to_array(model, img_filename_list): 
+    img_width, img_height = 224, 224
+    pred_list = []
+    is_exist = np.zeros((8,8), dtype=bool)
+    
+    for image_name in img_filename_list:
+            img_predict = []
+            print(image_name)
+            img = Image.open(image_name)
+            img = img.convert("RGB")
+            img = img.resize((img_width, img_height))
+            img_array = np.array(img, dtype=float)
+            img_predict.append(img_array)
+            for i in range(len(img_predict)):
+                img_predict[i] *= 1./255
+            img_predict = np.array(img_predict, dtype=float)
+            out = model.predict(img)
+            top_pred = np.argmax(out)
+            pred_list.append(top_pred)
+    for i, val in enumerate(pred_list):
+        if val == 1:
+            is_exist[i // 8][i % 8] = True
+    return is_exist
+
+def rescale_frame(frame, percent=75):
+    # width = int(frame.shape[1] * (percent / 100))
+    # height = int(frame.shape[0] * (percent / 100))
+    dim = (1000, 750)
+    return cv2.resize(frame, dim, interpolation=cv2.INTER_AREA)
+
+# Read image and do lite image processing
+def read_img_and_rescale(file, points):
+	img = cv2.imread(str(file), 1)
+
+	W = 1000
+	height, width, depth = img.shape
+	#imgScale = width 
+	imgScale = W / width
+	newX, newY = img.shape[1] * imgScale, img.shape[0] * imgScale
+	img = cv2.resize(img, (int(newX), int(newY)))
+	gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+	gray_blur = cv2.blur(gray, (5, 5))
+
+	points *= imgScale
+	return img, gray_blur
+
+def piece_detect(_frame,executor=None,filepath=os.path.dirname(__file__)+'/corner.npy'):
+#def piece_detect(_frame,filepath=os.path.dirname(__file__)+'/corner.npy'):
     print('piece_detect:')
-    model = load_model(os.path.dirname(__file__)+'/model_VGG16_weight_empty.h5')
+    model = load_model(os.path.dirname(__file__)+'/model_VGG16_weight_empty_log10.h5')
+    #for i in range(64):
+        #model[i] = load_model(os.path.dirname(__file__)+'/model_VGG16_weight_empty_log10.h5')
     print('loaded model')
-    camera,dist=get_calibration_data()
-    frame = cv2.convertScaleAbs(_frame,alpha = 1.1,beta=-30)
-    frame = undistort(img=frame,DIM=(640, 480),K=np.array(camera),D=np.array(dist))
+    #camera,dist=get_calibration_data()
+    #frame = cv2.convertScaleAbs(_frame,alpha = 1.2,beta=+15)
+    #rescale(frame)
+    #frame = undistort(img=frame,DIM=(640, 480),K=np.array(camera),D=np.array(dist))
     print('preprocessed')
-    cv2.imwrite('frame.jpeg', frame)
-    img, gray_blur = read_img('frame.jpeg')
-    write_crop_images(img, np.load(filepath), 0)
-    print('cropped')
+    #cv2.imwrite('frame.jpeg', frame)
+    corners = np.load(filepath)
+    #img, gray_blur = read_img_and_rescale('frame.jpeg', corners)
+    #write_crop_images(img, corners, 0)
+    #print('cropped')
     img_filename_list = grab_cell_files()
     img_filename_list.sort(key=natural_keys)
-    is_exist = classify_cells_to_array(model, img_filename_list)
+    start = time.time()
+    #pre_filter = piece_filter_high_canny(corners, img)
+    #print(pre_filter)
+    #is_exist = classify_cells_to_array(model, img_filename_list)
+    #print('simul')
+    #is_exist = classify_cells_to_array_simul(model, img_filename_list)
+    #is_exist = classify_cells_to_array_multi(img_filename_list,executor)
+    end = time.time()
+    print('time',end-start)
+
     print('classified')
     print(is_exist)
     return is_exist
 
+def piece_detect_test(executor=None,filepath=os.path.dirname(__file__)+'/corner.npy'):
+#def piece_detect(_frame,filepath=os.path.dirname(__file__)+'/corner.npy'):
+    executor = ProcessPoolExecutor(4)
+    #executor = ThreadPoolExecutor(4)
+    model = load_model(os.path.dirname(__file__)+'/model_VGG16_weight_empty_log10.h5')
+    while True:
+        print('piece_detect:')
+        #for i in range(64):
+            #model[i] = load_model(os.path.dirname(__file__)+'/model_VGG16_weight_empty_log10.h5')
+        print('loaded model')
+        #camera,dist=get_calibration_data()
+        #frame = cv2.convertScaleAbs(_frame,alpha = 1.2,beta=+15)
+        #rescale(frame)
+        #frame = undistort(img=frame,DIM=(640, 480),K=np.array(camera),D=np.array(dist))
+        print('preprocessed')
+        #cv2.imwrite('frame.jpeg', frame)
+        corners = np.load(filepath)
+        #img, gray_blur = read_img_and_rescale('frame.jpeg', corners)
+        #write_crop_images(img, corners, 0)
+        #print('cropped')
+        img_filename_list = grab_cell_files()
+        img_filename_list.sort(key=natural_keys)
+        start = time.time()
+        #pre_filter = piece_filter_high_canny(corners, img)
+        #print(pre_filter)
+        is_exist = classify_cells_to_array(model, img_filename_list)
+        #is_exist = classify_cells_to_array_simul(model, img_filename_list)
+        #is_exist = classify_cells_to_array_multi(img_filename_list,executor)
+        end = time.time()
+        print('time',end-start)
+
+        print('classified')
+        print(is_exist)
+    return is_exist
+
+def exist_to_fen(exist):
+    fen = ""
+    for i in range(8):
+        empty_count = 0
+        for j in range(8):
+            if exist[7-j][i]:
+                if empty_count > 0:
+                    fen += str(empty_count)
+                    empty_count = 0
+                fen += "P"
+            else:
+                empty_count += 1
+        if empty_count > 0:
+            fen += str(empty_count)
+        if i != 7:
+            fen += '/'
+    return fen
 # Converts the FEN into a PNG file
 def fen_to_image(fen):
     print("fen:"+fen)
@@ -490,6 +846,6 @@ def undistort(img=None,DIM=(1920, 1080),K=np.array([[  1.08515378e+03,   0.00000
     return cv2.remap(img, map1, map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
 
 if __name__ == '__main__':
-    cap = cv2.VideoCapture(0)	
-    ret, frame = cap.read()
-    piece_detect(frame)
+    #cap = cv2.VideoCapture(0)	
+    #ret, frame = cap.read()
+    piece_detect_test()
