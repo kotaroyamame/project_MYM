@@ -930,7 +930,7 @@ def piece_detect_test(_frame=None,executor=None,filepath=os.path.dirname(__file_
         print('alltime',allstart-time.time())
     return is_exist
 
-def exist_to_fen(exist):
+def exist_to_fen_two(exist):
     fen = ""
     for i in range(8):
         empty_count = 0
@@ -940,6 +940,25 @@ def exist_to_fen(exist):
                     fen += str(empty_count)
                     empty_count = 0
                 fen += "P"
+            else:
+                empty_count += 1
+        if empty_count > 0:
+            fen += str(empty_count)
+        if i != 7:
+            fen += '/'
+    return fen
+
+
+def exist_to_fen(exist):
+    fen = ""
+    for i in range(8):
+        empty_count = 0
+        for j in range(8):
+            if exist[7-j][i] <= 1:
+                if empty_count > 0:
+                    fen += str(empty_count)
+                    empty_count = 0
+                fen += "P" if exist[7-j][i] == 1 else "p"
             else:
                 empty_count += 1
         if empty_count > 0:
@@ -971,7 +990,7 @@ def undistort(img=None,DIM=(1920, 1080),K=np.array([[  1.08515378e+03,   0.00000
 
 DETECT_URL = 'http://127.0.0.1:8000/detect/detect/'
 
-def piece_detect_with_server(frame):
+def piece_detect_with_server_two(frame):
     start=time.time()
     csv_mimetype = 'text/csv'
     jpeg_mimetype = 'image/jpeg'
@@ -1010,9 +1029,48 @@ def piece_detect_with_server(frame):
     print('Time',time.time()-start)
     return is_exist
 
+def piece_detect_with_server(frame):
+    start=time.time()
+    csv_mimetype = 'text/csv'
+    jpeg_mimetype = 'image/jpeg'
+    corners = np.load(os.path.dirname(__file__)+'/corner.npy')
+    #corners = corners.astype('int32')
+    #data = {"corner_byte":base64.b64encode(corners.tobytes())}
+    data = {"array":corners.flatten().tolist()}
+    cv2.imwrite('frame.jpeg', frame)
+    img_name = 'frame.jpeg'
+    img_data = open(img_name, 'rb').read()
+    camera_name = os.path.dirname(__file__) + '/camera.csv'
+    camera_data = open(camera_name, 'rb').read()
+    dis_name = os.path.dirname(__file__) + '/dis.csv'
+    dis_data = open(dis_name, 'rb').read()
+    #print(corners)
+    #print(corners.dtype)
+    #print(np.shape(corners))
+    #print(str(data['corner_byte']))
+    #print(np.frombuffer(corners.tobytes()))
+    files = {'img': (img_name, img_data, jpeg_mimetype), 
+    'camera':(camera_name,camera_data,csv_mimetype),
+    'dis':(dis_name,dis_data,csv_mimetype),
+    }
+    while True:
+        try:
+            response = requests.post(DETECT_URL, data=data, files=files, timeout=(3.0,6.0))
+            break
+        except requests.exceptions.Timeout:
+            pass
+    pred_list = response.json()['data']
+    board_state = np.zeros((8,8), dtype=int)
+    for i, val in enumerate(pred_list):
+        if val == 1:
+            board_state[i // 8][i % 8] = val
+    print(board_state)
+    print('Time',time.time()-start)
+    return board_state
+
 TRAIN_URL = 'http://127.0.0.1:8000/detect/train/'
 
-def piece_detect_with_train(frame, answer, is_save):
+def piece_detect_with_train_two(frame, answer, is_save):
     start=time.time()
     csv_mimetype = 'text/csv'
     jpeg_mimetype = 'image/jpeg'
@@ -1045,7 +1103,41 @@ def piece_detect_with_train(frame, answer, is_save):
     print(is_exist)
     print('Time',time.time()-start)
     return is_exist
-    
+
+
+def piece_detect_with_train(frame, answer, is_save):
+    start=time.time()
+    csv_mimetype = 'text/csv'
+    jpeg_mimetype = 'image/jpeg'
+    corners = np.load(os.path.dirname(__file__)+'/corner.npy')
+    #corners = corners.astype('int32')
+    #data = {"corner_byte":base64.b64encode(corners.tobytes())}
+    data = {"array":corners.flatten().tolist(), "answer":answer.flatten().astype(int).tolist(), "is_save": is_save}
+    cv2.imwrite('frame.jpeg', frame)
+    img_name = 'frame.jpeg'
+    img_data = open(img_name, 'rb').read()
+    camera_name = os.path.dirname(__file__) + '/camera.csv'
+    camera_data = open(camera_name, 'rb').read()
+    dis_name = os.path.dirname(__file__) + '/dis.csv'
+    dis_data = open(dis_name, 'rb').read()
+    files = {'img': (img_name, img_data, jpeg_mimetype), 
+    'camera':(camera_name,camera_data,csv_mimetype),
+    'dis':(dis_name,dis_data,csv_mimetype),
+    }
+    while True:
+        try:
+            response = requests.post(TRAIN_URL, data=data, files=files, timeout=(3.0,6.0))
+            break
+        except requests.exceptions.Timeout:
+            pass
+    pred_list = response.json()['data']
+    board_state = np.zeros((8,8), dtype=int)
+    for i, val in enumerate(pred_list):
+        if val == 1:
+            board_state[i // 8][i % 8] = val
+    print(board_state)
+    print('Time',time.time()-start)
+    return board_state
     
 
 
